@@ -1,6 +1,7 @@
 #ifndef TCLBLINK_H
 #define TCLBLINK_H
 
+#include <tcl.h>
 #include "blink1-lib.h"
 
 typedef struct Blinker {

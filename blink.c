@@ -1,6 +1,4 @@
-#include "tcl.h" // swap "" with <> once I figure out the proper -I in the makefile.
 #include "blink.h"
-#include "blink1-lib.h"
 
 int Blink_Init(Tcl_Interp *interp) {
   BlinkState *statePtr;

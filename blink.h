@@ -18,11 +18,4 @@ static int BlinkClose(Blinker *blinkPtr);
 void BlinkCleanup(ClientData data);
 int BlinkDelete(Blinker *blinkPtr, Tcl_HashEntry *entryPtr);
 
-// static int BlinkRed(Blinker *blinkPtr);
-// static int BlinkGreen(Blinker *blinkPtr);
-
-static int BlinkEnumerate(Tcl_Interp *interp, BlinkState *statePtr);
-
-// static int BlinkSetRGB(Blinker *blinkPtr, int red, int green, int blue);
-
 #endif /* TCLBLINK_H */

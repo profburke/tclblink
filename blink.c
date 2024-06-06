@@ -34,7 +34,36 @@ void BlinkCleanup(ClientData data) {
   Tcl_Free((char *)statePtr);
 }
 
+// TODO: is statePtr necessary?
+// Return a count of attached Blink(1) devices.
+static int BlinkEnumerate(Tcl_Interp *interp, BlinkState *statePtr) {
+  Tcl_Obj *objPtr = Tcl_NewIntObj(blink1_enumerate());
+  Tcl_SetObjResult(interp, objPtr);
+  
+  return TCL_OK;
+}
 
+// TODO: is statePtr necessary?
+static int BlinkList(Tcl_Interp *interp, BlinkState *statePtr) {
+  Tcl_Obj *const objv[0];
+  Tcl_Obj *listPtr = Tcl_NewListObj(0, objv);
+
+  Tcl_Obj *devIDKeyPtr = Tcl_NewStringObj("Device ID", -1);
+  Tcl_Obj *serialKeyPtr = Tcl_NewStringObj("Serial", -1);
+  Tcl_Obj *typeKeyPtr = Tcl_NewStringObj("Type", -1);
+  
+  int n = blink1_enumerate();
+  for (int i = 0; i < n; i++) {
+    Tcl_Obj *dict = Tcl_NewDictObj();
+    Tcl_DictObjPut(interp, dict, devIDKeyPtr, Tcl_NewIntObj(i));
+    Tcl_DictObjPut(interp, dict, serialKeyPtr, Tcl_NewStringObj(blink1_getCachedSerial(i), -1));
+    Tcl_DictObjPut(interp, dict, typeKeyPtr, Tcl_NewIntObj(blink1_deviceTypeById(i)));
+    Tcl_ListObjAppendElement(interp, listPtr, dict); // returns TCL_OK if no error
+  }
+
+  Tcl_SetObjResult(interp, listPtr);
+  return TCL_OK;
+}
 
 static int BlinkSetRGB(Blinker *blinkPtr, int red, int green, int blue) {
   if (blinkPtr == NULL) {
@@ -86,7 +115,8 @@ int BlinkCmd(ClientData data, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[
   Tcl_Obj *valueObjPtr;
 
   char *subCmds[] = {
-    "enumerate", "open", "close",
+    "enumerate", "list",
+    "open", "close",
     "on", "off", "black", "white",
     "red", "green", "blue", "cyan",
     "magenta", "yellow", "orange",
@@ -94,7 +124,8 @@ int BlinkCmd(ClientData data, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[
   };
 
   enum BlinkIx {
-    EnumerateIx, OpenIx, CloseIx,
+    EnumerateIx, ListIx,
+    OpenIx, CloseIx,
     OnIx, OffIx, BlackIx, WhiteIx,
     RedIx, GreenIx, BlueIx, CyanIx,
     MagentaIx, YellowIx, OrangeIx,
@@ -118,6 +149,10 @@ int BlinkCmd(ClientData data, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[
     return BlinkEnumerate(interp, statePtr);
   }
 
+  if (index == ListIx) {
+    return BlinkList(interp, statePtr);
+  }
+  
   if (index == OpenIx) {
     return BlinkOpen(interp, statePtr, objv[2]);
   }
@@ -224,20 +259,3 @@ int BlinkDelete(Blinker *blinkPtr, Tcl_HashEntry *entryPtr) {
   Tcl_EventuallyFree((char *)blinkPtr, Tcl_Free);
   return TCL_OK;
 }
-
-// Return a count of attached Blink(1) devices.
-static int BlinkEnumerate(Tcl_Interp *interp, BlinkState *statePtr) {
-  Tcl_Obj *objPtr = Tcl_NewIntObj(blink1_enumerate());
-  Tcl_SetObjResult(interp, objPtr);
-  
-  return TCL_OK;
-}
-
-// static int BlinkRed(Blinker *blinkPtr) {
-//   return BlinkSetRGB(blinkPtr, 255, 0, 0);
-// }
-
-// static int BlinkGreen(Blinker *blinkPtr) {
-//   return BlinkSetRGB(blinkPtr, 0, 255, 0);
-// }
-

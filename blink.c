@@ -1,21 +1,5 @@
 #include "blink.h"
 
-int Blink_Init(Tcl_Interp *interp) {
-  BlinkState *statePtr;
-
-  if (Tcl_InitStubs(interp, TCL_VERSION, 0) == NULL) {
-    return TCL_ERROR;
-  }
-  
-  statePtr = (BlinkState *)Tcl_Alloc(sizeof(BlinkState));
-  Tcl_InitHashTable(&statePtr->hash, TCL_STRING_KEYS); // TCL_STRING_KEYS or something else ?
-  statePtr->uid = 0;
-  
-  Tcl_CreateObjCommand(interp, "blink", BlinkCmd, (ClientData)statePtr, BlinkCleanup);
-
-  return TCL_OK;
-}
-
 void BlinkCleanup(ClientData data) {
   BlinkState *statePtr = (BlinkState *)data;
   Blinker *blinkPtr;
@@ -43,8 +27,8 @@ static int BlinkEnumerate(Tcl_Interp *interp, BlinkState *statePtr) {
 
 // TODO: is statePtr necessary?
 static int BlinkList(Tcl_Interp *interp, BlinkState *statePtr) {
-  Tcl_Obj *const objv[0];
-  Tcl_Obj *listPtr = Tcl_NewListObj(0, objv);
+  Tcl_Obj *const objects[0];
+  Tcl_Obj *listPtr = Tcl_NewListObj(0, objects);
 
   Tcl_Obj *devIDKeyPtr = Tcl_NewStringObj("Device ID", -1);
   Tcl_Obj *serialKeyPtr = Tcl_NewStringObj("Serial", -1);
@@ -56,7 +40,10 @@ static int BlinkList(Tcl_Interp *interp, BlinkState *statePtr) {
     Tcl_DictObjPut(interp, dict, devIDKeyPtr, Tcl_NewIntObj(i));
     Tcl_DictObjPut(interp, dict, serialKeyPtr, Tcl_NewStringObj(blink1_getCachedSerial(i), -1));
     Tcl_DictObjPut(interp, dict, typeKeyPtr, Tcl_NewIntObj(blink1_deviceTypeById(i)));
-    Tcl_ListObjAppendElement(interp, listPtr, dict); // returns TCL_OK if no error
+
+    if (Tcl_ListObjAppendElement(interp, listPtr, dict) != TCL_OK) {
+      return TCL_ERROR;
+    }
   }
 
   Tcl_SetObjResult(interp, listPtr);
@@ -107,13 +94,91 @@ SET(Yellow, 255, 255, 0)
 
 SET(Orange, 255, 165, 0)
 
+// Given a device ID, "open" the corresponding device.
+// TODO: for now we're only implementing opening by device ID
+// we'll come back and do serial # later
+static int BlinkOpen(Tcl_Interp *interp, BlinkState *statePtr, Tcl_Obj *objPtr) {
+  Tcl_HashEntry *entryPtr;
+  int new;
+  Blinker *blinkPtr;
+  char name[20];
+  int devid;
 
+  if (objPtr != NULL) {
+    if (Tcl_GetIntFromObj(interp, objPtr, &devid) != TCL_OK) {
+      return TCL_ERROR;
+    }
+  } else {
+    // shouldn't be possible
+    return TCL_ERROR;
+  }
+
+  int n = blink1_enumerate(); // need to enumerate before trying to create a device
+
+  blinkPtr = Tcl_Alloc(sizeof(Blinker));
+  blinkPtr->device = NULL;
+  blinkPtr->device = blink1_openById(devid);
+
+  if (blinkPtr->device == NULL) {
+    // signal error
+    printf("Got an error opening device\n");
+
+    return TCL_ERROR; // TCL_ERROR or a blink-specific error?
+  }
+
+  sprintf(name, "blink%d", devid);
+  entryPtr = Tcl_CreateHashEntry(&statePtr->hash, name, &new);
+  Tcl_SetHashValue(entryPtr, (ClientData)blinkPtr);
+
+  Tcl_SetStringObj(Tcl_GetObjResult(interp), name, -1);
+  // Tcl_Obj *resultPtr = Tcl_NewStringObj(name, -1);
+  // Tcl_SetObjResult(interp, resultPtr);
+
+  return TCL_OK;
+}
+
+static int BlinkClose(Blinker *blinkPtr) {
+  if (blinkPtr->device != NULL) {
+    blink1_setRGB(blinkPtr->device, 0, 0, 0);
+    blink1_close(blinkPtr->device);
+    blinkPtr->device = NULL;
+  }
+
+  return TCL_OK;
+}
+
+int BlinkDelete(Blinker *blinkPtr, Tcl_HashEntry *entryPtr) {
+  Tcl_DeleteHashEntry(entryPtr);
+
+  if (blinkPtr->device != NULL) {
+    // close the blink device ...
+  }
+
+  Tcl_EventuallyFree((char *)blinkPtr, Tcl_Free);
+  return TCL_OK;
+}
+
+static int BlinkVid(Tcl_Interp *interp) {
+  Tcl_Obj *objPtr = Tcl_NewIntObj(blink1_vid());
+  Tcl_SetObjResult(interp, objPtr);
+
+  return TCL_OK;
+}
+
+static int BlinkPid(Tcl_Interp *interp) {
+  Tcl_Obj *objPtr = Tcl_NewIntObj(blink1_pid());
+  Tcl_SetObjResult(interp, objPtr);
+
+  return TCL_OK;
+}
+
+// TODO: would this be simpler as an ensemble command?
 int BlinkCmd(ClientData data, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]) {
   BlinkState *statePtr = (BlinkState *)data;
   Tcl_Obj *valueObjPtr;
 
   char *subCmds[] = {
-    "enumerate", "list",
+    "vid", "pid", "enumerate", "list",
     "open", "close", "set",
     "on", "off", "black", "white",
     "red", "green", "blue", "cyan",
@@ -122,7 +187,7 @@ int BlinkCmd(ClientData data, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[
   };
 
   enum BlinkIx {
-    EnumerateIx, ListIx,
+    VidIx, PidIx, EnumerateIx, ListIx,
     OpenIx, CloseIx, SetIx, 
     OnIx, OffIx, BlackIx, WhiteIx,
     RedIx, GreenIx, BlueIx, CyanIx,
@@ -142,17 +207,18 @@ int BlinkCmd(ClientData data, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[
   // More processing
   // valueObjPtr = objv[3];
   valueObjPtr = NULL;
-  
-  if (index == EnumerateIx) {
-    return BlinkEnumerate(interp, statePtr);
-  }
 
-  if (index == ListIx) {
+  switch(index) {
+  case EnumerateIx:
+    return BlinkEnumerate(interp, statePtr);
+  case ListIx:
     return BlinkList(interp, statePtr);
-  }
-  
-  if (index == OpenIx) {
+  case OpenIx:
     return BlinkOpen(interp, statePtr, objv[2]);
+  case VidIx:
+    return BlinkVid(interp);
+  case PidIx:
+    return BlinkPid(interp);
   }
 
   // The following commands take a blink name as the third parameter:
@@ -189,81 +255,38 @@ int BlinkCmd(ClientData data, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[
     return BlinkYellow(blinkPtr);
   case OrangeIx:
     return BlinkOrange(blinkPtr);
-  case SetIx: {
-    // TODO: validating ...
-    int r;
-    int g;
-    int b;
-    Tcl_GetIntFromObj(interp, objv[3], &r);
-    Tcl_GetIntFromObj(interp, objv[4], &g);
-    Tcl_GetIntFromObj(interp, objv[5], &b);
-    return BlinkSetRGB(blinkPtr, r, g, b);
+  case SetIx:
+    {
+      // TODO: validating ...
+      int r, g, b;
+      Tcl_GetIntFromObj(interp, objv[3], &r);
+      Tcl_GetIntFromObj(interp, objv[4], &g);
+      Tcl_GetIntFromObj(interp, objv[5], &b);
+      return BlinkSetRGB(blinkPtr, r, g, b);
+    }
   }
-  }
-  
+
+  // TODO: shouldn't really allow dropping through ... is it even possible?
   return TCL_OK;
 }
 
-// Given a device ID, "open" the corresponding device.  
-// TODO: for now we're only implementing opening by device ID
-// we'll come back and do serial # later
-static int BlinkOpen(Tcl_Interp *interp, BlinkState *statePtr, Tcl_Obj *objPtr) {
-  Tcl_HashEntry *entryPtr;
-  int new;
-  Blinker *blinkPtr;
-  char name[20];
-  int devid;
+/********************************************
+ *
+ * Library entry point.
+ *
+ ********************************************/
+int Blink_Init(Tcl_Interp *interp) {
+  BlinkState *statePtr;
 
-  if (objPtr != NULL) {
-    if (Tcl_GetIntFromObj(interp, objPtr, &devid) != TCL_OK) {
-      return TCL_ERROR;
-    }
-  } else {
-    // shouldn't be possible
+  if (Tcl_InitStubs(interp, TCL_VERSION, 0) == NULL) {
     return TCL_ERROR;
   }
-
-  int n = blink1_enumerate(); // need to enumerate before trying to create a device
   
-  blinkPtr = Tcl_Alloc(sizeof(Blinker));
-  blinkPtr->device = NULL;
-  blinkPtr->device = blink1_openById(devid);
-
-  if (blinkPtr->device == NULL) {
-    // signal error
-    printf("Got an error opening device\n");
-    
-    return TCL_ERROR; // TCL_ERROR or a blink-specific error?
-  }
-
-  sprintf(name, "blink%d", devid);
-  entryPtr = Tcl_CreateHashEntry(&statePtr->hash, name, &new);
-  Tcl_SetHashValue(entryPtr, (ClientData)blinkPtr);
-
-  Tcl_SetStringObj(Tcl_GetObjResult(interp), name, -1);
-  // Tcl_Obj *resultPtr = Tcl_NewStringObj(name, -1);
-  // Tcl_SetObjResult(interp, resultPtr);
+  statePtr = (BlinkState *)Tcl_Alloc(sizeof(BlinkState));
+  Tcl_InitHashTable(&statePtr->hash, TCL_STRING_KEYS); // TCL_STRING_KEYS or something else ?
+  statePtr->uid = 0;
   
-  return TCL_OK;
-}
+  Tcl_CreateObjCommand(interp, "blink", BlinkCmd, (ClientData)statePtr, BlinkCleanup);
 
-static int BlinkClose(Blinker *blinkPtr) {
-  if (blinkPtr->device != NULL) {
-    blink1_setRGB(blinkPtr->device, 0, 0, 0);
-    blink1_close(blinkPtr->device);
-    blinkPtr->device = NULL;
-  }
-  
-  return TCL_OK;
-}
-
-int BlinkDelete(Blinker *blinkPtr, Tcl_HashEntry *entryPtr) {
-  Tcl_DeleteHashEntry(entryPtr);
-
-  if (blinkPtr->device != NULL) {
-    // close the blink device ...
-  }
-  
-  Tcl_EventuallyFree((char *)blinkPtr, Tcl_Free);
   return TCL_OK;
 }

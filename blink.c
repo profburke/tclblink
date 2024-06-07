@@ -114,7 +114,7 @@ int BlinkCmd(ClientData data, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[
 
   char *subCmds[] = {
     "enumerate", "list",
-    "open", "close",
+    "open", "close", "set",
     "on", "off", "black", "white",
     "red", "green", "blue", "cyan",
     "magenta", "yellow", "orange",
@@ -123,14 +123,14 @@ int BlinkCmd(ClientData data, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[
 
   enum BlinkIx {
     EnumerateIx, ListIx,
-    OpenIx, CloseIx,
+    OpenIx, CloseIx, SetIx, 
     OnIx, OffIx, BlackIx, WhiteIx,
     RedIx, GreenIx, BlueIx, CyanIx,
     MagentaIx, YellowIx, OrangeIx,
   };
   int result, index;
 
-  if (objc == 1 || objc > 4 /* ??? */) {
+  if (objc == 1 || objc > 6 /* ??? */) {
     Tcl_WrongNumArgs(interp, 1, objv, "option ... TBD ...");
     return TCL_ERROR;
   }
@@ -189,6 +189,16 @@ int BlinkCmd(ClientData data, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[
     return BlinkYellow(blinkPtr);
   case OrangeIx:
     return BlinkOrange(blinkPtr);
+  case SetIx: {
+    // TODO: validating ...
+    int r;
+    int g;
+    int b;
+    Tcl_GetIntFromObj(interp, objv[3], &r);
+    Tcl_GetIntFromObj(interp, objv[4], &g);
+    Tcl_GetIntFromObj(interp, objv[5], &b);
+    return BlinkSetRGB(blinkPtr, r, g, b);
+  }
   }
   
   return TCL_OK;

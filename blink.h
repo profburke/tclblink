@@ -4,6 +4,8 @@
 #include <tcl.h>
 #include "blink1-lib.h"
 
+#define PACKAGE_VERSION "1.0"
+
 typedef struct Blinker {
   blink1_device *device;
 } Blinker;

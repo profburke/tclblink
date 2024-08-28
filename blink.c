@@ -49,6 +49,14 @@ static int BlinkList(Tcl_Interp *interp) {
   return TCL_OK;
 }
 
+/// Returns the specified device's serial number.
+static int BlinkSerial(Tcl_Interp *interp, Blinker *blinkPtr) {
+  Tcl_Obj *objPtr = Tcl_NewStringObj(blink1_getSerialForDev(blinkPtr->device), -1); // TODO: deal with error
+  Tcl_SetObjResult(interp, objPtr);
+
+  return TCL_OK;
+}
+
 static int inrange(int color) {
   return 0 <= color && color <= 255;
 }
@@ -126,7 +134,7 @@ SET(Yellow, 255, 255, 0)
 /// Set the specified Blink(1) to display orange.
 SET(Orange, 255, 165, 0)
 
-/// Given a device ID, "open"s the corresponding device.
+/// Attaches to the specidied Blink(1).
 static int BlinkOpen(Tcl_Interp *interp, BlinkState *statePtr, Tcl_Obj *objPtr) {
   Tcl_HashEntry *entryPtr;
   int new;
@@ -148,16 +156,15 @@ static int BlinkOpen(Tcl_Interp *interp, BlinkState *statePtr, Tcl_Obj *objPtr) 
     return TCL_ERROR;
   }
 
-  int n = blink1_enumerate(); // need to enumerate before trying to create a device
+  int n = blink1_enumerate(); // necessary before creating a device
 
-  blinkPtr = Tcl_Alloc(sizeof(Blinker));
+  blinkPtr = (Blinker *)Tcl_Alloc(sizeof(Blinker));
+
   blinkPtr->device = NULL;
   blinkPtr->device = blink1_openById(devid);
-
+  
   if (blinkPtr->device == NULL) {
-    // signal error
-    //printf("Got an error opening device\n");
-
+    Tcl_SetObjResult(interp, Tcl_NewStringObj("Could not open blink(1)", -1));
     return TCL_ERROR; // TCL_ERROR or a blink-specific error?
   }
 
@@ -218,20 +225,20 @@ int BlinkCmd(ClientData data, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[
   char *subCmds[] = {
     "black", "blue", "close", "cyan", "enumerate", "green",
     "list", "magenta", "off", "on", "open", "orange", "pid",
-    "red", "set", "vid", "white", "yellow",
+    "red", "serial", "set", "vid", "white", "yellow",
     NULL
   };
 
   int numArgs[] = {
     3, 3, 3, 3, 2, 3,
     2, 3, 3, 3, 3, 3, 2,
-    3, 6, 2, 3, 3,
+    3, 3, 6, 2, 3, 3,
   };
   
   enum BlinkIx {
     BlackIx, BlueIx, CloseIx, CyanIx, EnumerateIx, GreenIx,
     ListIx, MagentaIx, OffIx, OnIx, OpenIx, OrangeIx, PidIx,
-    RedIx, SetIx, VidIx, WhiteIx, YellowIx,
+    RedIx, SerialIx, SetIx, VidIx, WhiteIx, YellowIx,
   };
   int result, index;
  
@@ -292,12 +299,15 @@ int BlinkCmd(ClientData data, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[
     return BlinkYellow(interp, blinkPtr);
   case OrangeIx:
     return BlinkOrange(interp, blinkPtr);
+  case SerialIx:
+    return BlinkSerial(interp, blinkPtr);
   case SetIx:
     {
-      int r, g, b;
-      Tcl_GetIntFromObj(interp, objv[3], &r);
-      Tcl_GetIntFromObj(interp, objv[4], &g);
-      Tcl_GetIntFromObj(interp, objv[5], &b);
+      Tcl_WideInt buf;
+      int r, g, b, type;
+      if (Tcl_GetIntFromObj(interp, objv[3], &r) != TCL_OK) { return TCL_ERROR; }
+      if (Tcl_GetIntFromObj(interp, objv[4], &g) != TCL_OK) { return TCL_ERROR; }
+      if (Tcl_GetIntFromObj(interp, objv[5], &b) != TCL_OK) { return TCL_ERROR; }
       return BlinkSetRGB(interp, blinkPtr, r, g, b);
     }
   }
@@ -310,6 +320,8 @@ int BlinkCmd(ClientData data, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[
 int Blink_Init(Tcl_Interp *interp) {
   BlinkState *statePtr;
 
+  blink1_lib_verbose = 1;
+  
   // TODO: do we need stubs? TBH I don't really understand what they are.
   // Need to find and read the relevent documentation.
   if (Tcl_InitStubs(interp, TCL_VERSION, 0) == NULL) {
@@ -321,7 +333,7 @@ int Blink_Init(Tcl_Interp *interp) {
   statePtr->uid = 0; // TODO: probably don't need this; left over from example
   
   Tcl_CreateObjCommand(interp, "blink", BlinkCmd, (ClientData)statePtr, BlinkCleanup);
-  Tcl_PkgProvide(interp, "blink", "1.0");
+  Tcl_PkgProvide(interp, "blink", PACKAGE_VERSION);
 
   return TCL_OK;
 }
